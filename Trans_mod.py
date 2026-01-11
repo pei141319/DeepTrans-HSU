@@ -16,6 +16,7 @@ import time
 import scipy.io as sio
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 # from torchsummary import summary  # 模型结构摘要（注释未启用，需额外安装）
 
 # 导入项目自定义模块
@@ -24,6 +25,31 @@ import plots     # 结果可视化模块（对应plots.py）
 import transformer  # ViT网络实现（对应transformer.py）
 import utils     # 工具函数（指标计算、损失函数，对应utils.py）
 
+# 光谱平滑性损失类
+class SpectralSmoothnessLoss(torch.nn.Module):
+    def __init__(self):
+        super(SpectralSmoothnessLoss, self).__init__()
+
+    def forward(self, endmembers):
+        """
+        计算端元光谱的平滑性损失
+        endmembers: (L, P) - L是波段数，P是端元数
+        """
+        # 计算相邻波段间的差分（二阶差分，更严格的平滑性）
+        if endmembers.shape[0] < 3:
+            # 如果波段数少于3，则只计算一阶差分
+            if endmembers.shape[0] < 2:
+                return torch.tensor(0.0, device=endmembers.device, requires_grad=True)
+            diff1 = endmembers[1:, :] - endmembers[:-1, :]
+            smoothness_loss = torch.mean(diff1 ** 2)
+        else:
+            # 计算一阶差分
+            diff1 = endmembers[1:, :] - endmembers[:-1, :]
+            # 计算二阶差分
+            diff2 = diff1[1:, :] - diff1[:-1, :]
+            # 使用L2范数计算平滑性损失
+            smoothness_loss = torch.mean(diff2 ** 2)
+        return smoothness_loss
 
 # -------------------------
 # AutoEncoder类：CNN-ViT混合自编码器（高光谱解混核心模型）
@@ -153,6 +179,9 @@ class Train_test:
         self.dataset = dataset        # 数据集名称
         self.save = save              # 是否保存结果
 
+        # 添加光谱平滑性损失权重参数
+        self.lambda_smooth = 10  # 平滑性损失的权重，可根据需要调整！！！！！
+
         # 1. 创建结果保存目录（按数据集命名，避免结果覆盖）
         self.save_dir = "trans_mod_" + dataset + "/"
         os.makedirs(self.save_dir, exist_ok=True)  # 目录已存在则不报错
@@ -221,9 +250,9 @@ class Train_test:
         net.apply(net.weights_init)
 
         # （注释部分：解码器权重初始化，使用数据集提供的初始端元权重）
-        # model_dict = net.state_dict()
-        # model_dict['decoder.0.weight'] = self.init_weight
-        # net.load_state_dict(model_dict)
+        model_dict = net.state_dict()
+        model_dict['decoder.0.weight'] = self.init_weight
+        net.load_state_dict(model_dict)
 
         # 4. 配置损失函数、优化器、学习率调度器
         loss_func = nn.MSELoss(reduction='mean')  # 重构损失：均方误差（MSE）
@@ -254,7 +283,7 @@ class Train_test:
                     # 前向传播：获取预测丰度和重构图像
                     abu_est, re_result = net(x)
 
-                    # 5.3 计算损失（总损失=重构损失+SAD损失）
+                    # 5.3 计算损失（总损失=重构损失+SAD损失+光谱平滑性损失）
                     loss_re = self.beta * loss_func(re_result, x)  # 重构损失（乘以权重beta）
                     # 计算SAD损失（调整数据形状，适配utils.SAD计算）
                     loss_sad = loss_func2(
@@ -262,7 +291,14 @@ class Train_test:
                         x.view(1, self.L, -1).transpose(1, 2)
                     )
                     loss_sad = self.gamma * torch.sum(loss_sad).float()  # SAD损失（乘以权重gamma）
-                    total_loss = loss_re + loss_sad  # 总损失
+                    
+                    # 计算光谱平滑性损失
+                    est_endmem = net.state_dict()["decoder.0.weight"].cpu().numpy()
+                    est_endmem = torch.tensor(est_endmem.reshape((self.L, self.P)), device=self.device)
+                    spectral_smoothness_loss = SpectralSmoothnessLoss()(est_endmem)
+                    
+                    # 总损失
+                    total_loss = loss_re + loss_sad + self.lambda_smooth * spectral_smoothness_loss
 
                     # 5.4 反向传播与参数更新
                     optimizer.zero_grad()  # 清空梯度（避免梯度累积）
@@ -277,7 +313,8 @@ class Train_test:
                     if epoch % 10 == 0:
                         print('Epoch:', epoch, '| train loss: %.4f' % total_loss.data,
                               '| re loss: %.4f' % loss_re.data,
-                              '| sad loss: %.4f' % loss_sad.data)
+                              '| sad loss: %.4f' % loss_sad.data,
+                              '| smooth loss: %.4f' % (self.lambda_smooth * spectral_smoothness_loss.data))
                     # 保存当前轮次总损失
                     epo_vs_los.append(float(total_loss.data))
 
@@ -331,8 +368,16 @@ class Train_test:
             import matplotlib.pyplot as plt
             import numpy as np
             plt.figure(figsize=(10, 5))
+            # 根据数据集类型定义地物类别名称
+            if self.dataset == 'samson':
+                class_names = ['Soil', 'Tree', 'Water']
+            elif self.dataset == 'jasper':
+                class_names = ['Veg', 'Soil', 'Water', 'Road']
+            else:
+                class_names = [f'Endmember {i + 1}' for i in range(self.P)]
+                
             for i in range(self.P):
-                plt.plot(np.arange(self.L), est_endmem[:, i], label=f'Endmember {i + 1}')
+                plt.plot(np.arange(self.L), est_endmem[:, i], label=class_names[i])
             plt.xlabel('Spectral Band')
             plt.ylabel('Reflectance')
             plt.title(f'{self.dataset} Estimated Endmember Spectra')
@@ -343,10 +388,18 @@ class Train_test:
 
             # 7.6 可视化丰度图（子图绘制，保存为png）
             fig, axes = plt.subplots(1, self.P, figsize=(4 * self.P, 4))
+            # 根据数据集类型定义地物类别名称
+            if self.dataset == 'samson':
+                class_names = ['Soil', 'Tree', 'Water']
+            elif self.dataset == 'jasper':
+                class_names = ['Veg', 'Soil', 'Water', 'Road']
+            else:
+                class_names = [f'Endmember {i + 1}' for i in range(self.P)]
+                
             for i in range(self.P):
                 ax = axes[i] if self.P > 1 else axes
                 im = ax.imshow(abu_est[:, :, i], cmap='viridis')
-                ax.set_title(f'Endmember {i + 1} Abundance')
+                ax.set_title(f'{class_names[i]} Abundance')
                 ax.axis('off')
                 fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
             plt.tight_layout()
@@ -380,9 +433,9 @@ class Train_test:
                 file.write(f"RMSE: {mean_rmse:.4f}\n")
 
             # 7.9 调用plots模块，生成更详细的结果可视化图
-            plots.plot_abundance(target, abu_est, self.P, self.save_dir)
-            plots.plot_endmembers(true_endmem, est_endmem, self.P, self.save_dir)
-        
+            plots.plot_abundance(target, abu_est, self.P, self.save_dir, self.dataset)
+            plots.plot_endmembers(true_endmem, est_endmem, self.P, self.save_dir, self.dataset)
+
 # =================================================================
 # 主入口：该文件作为模块被main.py导入，不直接运行（故pass）
 if __name__ == '__main__':
