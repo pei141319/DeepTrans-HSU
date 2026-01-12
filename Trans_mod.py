@@ -17,6 +17,7 @@ import scipy.io as sio
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import StepLR
 # from torchsummary import summary  # 模型结构摘要（注释未启用，需额外安装）
 
 # 导入项目自定义模块
@@ -202,6 +203,20 @@ class Train_test:
             # 加载端元初始权重（用于解码器初始化，适配物理意义）
             self.init_weight = self.data.get("init_weight").unsqueeze(2).unsqueeze(3).float()
 
+
+        elif dataset == 'jasper':
+            self.P, self.L, self.col = 4, 198, 100
+            self.LR, self.EPOCH = 6e-3, 300 #从 8e-3 降到 4e-3，轮数从 200 增到 300
+            self.patch, self.dim = 5, 200
+            self.beta, self.gamma = 5e3, 6e-2  # 将 gamma 从 4e-2 提高到 6e-2，强制模型更关注光谱形状
+            self.weight_decay_param = 3e-5
+            # 注意：如果训练出来颜色不对，可以调整这个顺序对齐真值标签
+            self.order_abd, self.order_endmem = (0, 1, 2, 3), (0, 1, 2, 3)
+            self.data = datasets.Data(dataset, device)
+            self.loader = self.data.get_loader(batch_size=self.col ** 2)
+            self.init_weight = self.data.get("init_weight").unsqueeze(2).unsqueeze(3).float()
+
+
         elif dataset == 'apex':
             # APEX数据集：4端元、285波段、110×110像素
             self.P, self.L, self.col = 4, 285, 110
@@ -228,7 +243,7 @@ class Train_test:
 
         else:
             # 未知数据集抛出异常
-            raise ValueError("Unknown dataset - 仅支持samson/apex/dc")
+            raise ValueError("Unknown dataset - 仅支持jasper/samson/apex/dc")
 
     def run(self, smry):
         """
@@ -261,10 +276,13 @@ class Train_test:
         optimizer = torch.optim.Adam(
             net.parameters(), lr=self.LR, weight_decay=self.weight_decay_param
         )
-        # 学习率调度器：StepLR（每15轮学习率衰减为原来的0.8）
+       # 4. 配置优化器后的调度器修改
+        # 原来是 step_size=15, gamma=0.8 (衰减太快)
+        # 建议改为：每 50 轮减半，配合 300 轮的总轮数
         scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer, step_size=15, gamma=0.8
+            optimizer, step_size=50, gamma=0.5
         )
+
         # 实例化参数非负约束器
         apply_clamp_inst1 = NonZeroClipper()
         

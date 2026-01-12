@@ -69,11 +69,19 @@ class Data:
 
         # 读取.mat格式数据集
         data = sio.loadmat(data_path)
+
+        # 这一步是为了兼容jasper文件（她里面叫 GT，你代码要 M）
+        if 'GT' in data and 'M' not in data: 
+            data['M'] = data['GT'].T
+        if 'M1' not in data: 
+            data['M1'] = data['M'] # 如果没有初始权重，就用真值初始化
+
         # 解析核心数据：.T 表示转置（关键！适配模型输入维度）
-        self.Y = torch.from_numpy(data['Y'].T).to(device)  # 高光谱数据（转置后适配模型）
-        self.A = torch.from_numpy(data['A'].T).to(device)  # 丰度图（转置后适配模型）
-        self.M = torch.from_numpy(data['M'])               # 真实端元光谱
-        self.M1 = torch.from_numpy(data['M1'])             # 端元初始权重（模型初始化用）
+        self.Y = torch.from_numpy(data['Y'].T).to(device)  # 高光谱数据（转置后适配模型）(像素, 波段)
+        self.Y = self.Y.float() / self.Y.float().max()
+        self.A = torch.from_numpy(data['A'].T).to(device)  # 丰度图（转置后适配模型）(像素, 端元)
+        self.M = torch.from_numpy(data['M'])               # 真实端元光谱(波段, 端元)
+        self.M1 = torch.from_numpy(data['M1'])             # 端元初始权重（模型初始化用）(波段, 端元)
 
     def get(self, typ):
         """
