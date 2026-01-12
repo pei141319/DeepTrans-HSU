@@ -1,0 +1,4 @@
+Dataset: apex
+Method: VCA + FCLS
+Mean SAD: 0.6641
+Mean RMSE: 0.4457

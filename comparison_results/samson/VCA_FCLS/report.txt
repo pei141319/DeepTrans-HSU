@@ -1,0 +1,3 @@
+Dataset: samson
+mSAD: 0.0925
+mRMSE: 0.2101

@@ -1,0 +1,4 @@
+Dataset: samson
+Method: VCA + FCLS
+Mean SAD: 0.0925
+Mean RMSE: 0.2101

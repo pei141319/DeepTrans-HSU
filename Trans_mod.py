@@ -454,6 +454,7 @@ class Train_test:
             plots.plot_abundance(target, abu_est, self.P, self.save_dir, self.dataset)
             plots.plot_endmembers(true_endmem, est_endmem, self.P, self.save_dir, self.dataset)
 
+            return mean_sad, mean_rmse##
 # =================================================================
 # 主入口：该文件作为模块被main.py导入，不直接运行（故pass）
 if __name__ == '__main__':

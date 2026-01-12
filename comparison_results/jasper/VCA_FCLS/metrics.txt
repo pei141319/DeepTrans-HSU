@@ -1,0 +1,4 @@
+Dataset: jasper
+Method: VCA + FCLS
+Mean SAD: 0.4626
+Mean RMSE: 0.3671
