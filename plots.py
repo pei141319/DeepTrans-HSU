@@ -41,6 +41,9 @@ def plot_abundance(ground_truth, estimated, em, save_dir, dataset='unknown'):
         class_names = ['Soil', 'Tree', 'Water']
     elif dataset == 'jasper':
         class_names = ['Veg', 'Soil', 'Water', 'Road']
+    elif dataset == 'apex':
+        # APEX数据集的标准4端元：水体、植被、道路、土壤
+        class_names = ['Water', 'Tree', 'Road', 'Soil']
     else:
         class_names = [f'Endmember {i + 1}' for i in range(em)]
     

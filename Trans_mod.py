@@ -220,11 +220,11 @@ class Train_test:
         elif dataset == 'apex':
             # APEX数据集：4端元、285波段、110×110像素
             self.P, self.L, self.col = 4, 285, 110
-            self.LR, self.EPOCH = 9e-3, 200
+            self.LR, self.EPOCH = 8e-3, 200
             self.patch, self.dim = 5, 200
             self.beta, self.gamma = 5e3, 5e-2
             self.weight_decay_param = 4e-5
-            self.order_abd, self.order_endmem = (3, 1, 2, 0), (3, 1, 2, 0)
+            self.order_abd, self.order_endmem = (0, 1, 2, 3), (0, 1, 2, 3)
             self.data = datasets.Data(dataset, device)
             self.loader = self.data.get_loader(batch_size=self.col ** 2)
             self.init_weight = self.data.get("init_weight").unsqueeze(2).unsqueeze(3).float()

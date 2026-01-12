@@ -54,7 +54,7 @@ print("Selected device:", device)
 # -------------------------
 # 实例化Train_test类，配置实验参数
 tmod = Trans_mod.Train_test(
-    dataset='jasper',  # 指定训练数据集：'dc'为测试用数据集，毕设需改为'samson'/'jasper/apex'（需匹配Trans_mod内的数据集映射）
+    dataset='apex',  # 指定训练数据集：'dc'为测试用数据集，毕设需改为'samson'/'jasper/apex'（需匹配Trans_mod内的数据集映射）
     device=device,  # 指定模型训练/测试的计算设备（上述选中的cuda:0/cpu）
     skip_train=False,  # 是否跳过训练：False=从头训练；True=加载已保存模型直接测试（训练完成后可改True）
     save=True  # 是否保存结果：True=保存模型权重、SAD/RMSE指标、可视化图；False=仅临时运行不保存
