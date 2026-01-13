@@ -52,98 +52,186 @@ class SpectralSmoothnessLoss(torch.nn.Module):
             smoothness_loss = torch.mean(diff2 ** 2)
         return smoothness_loss
 
+# # -------------------------
+# # AutoEncoder类：CNN-ViT混合自编码器（高光谱解混核心模型）
+# # 作用：实现高光谱图像的编码、特征提取、丰度预测与图像重构
+# # -------------------------
+# class AutoEncoder(nn.Module):
+#     def __init__(self, P, L, size, patch, dim):
+#         """
+#         初始化自编码器模型
+#         :param P: int - 端元数（地物类别数，如Samson=3、DC=6）
+#         :param L: int - 高光谱波段数（如Samson=156、DC=191）
+#         :param size: int - 高光谱图像的空间尺寸（如Samson=95 → 95×95像素）
+#         :param patch: int - ViT的.patch尺寸（图像分块大小）
+#         :param dim: int - ViT的特征维度（嵌入维度）
+#         """
+#         super(AutoEncoder, self).__init__()
+#         # 保存模型核心参数（供前向传播使用）
+#         self.P, self.L, self.size, self.dim = P, L, size, dim
+
+#         # 1. 编码器（Encoder）：CNN卷积层，用于提取高光谱图像的光谱-空间特征
+#         # 输入：(1, L, size, size) → 输出：(1, (dim*P)//patch**2, size, size)
+#         self.encoder = nn.Sequential(
+#             # 第1层：1×1卷积（波段维度压缩），输入L维 → 输出128维
+#             nn.Conv2d(L, 128, kernel_size=(1, 1), stride=(1, 1), padding=(0, 0)),
+#             nn.BatchNorm2d(128, momentum=0.9),  # 批量归一化（加速收敛，防止过拟合）
+#             nn.Dropout(0.25),  # Dropout正则化（随机丢弃25%神经元，防止过拟合）
+#             nn.LeakyReLU(),  # 激活函数（带泄露的ReLU，避免梯度消失）
+#             # 第2层：1×1卷积，128维 → 64维
+#             nn.Conv2d(128, 64, kernel_size=(1, 1), stride=(1, 1), padding=(0, 0)),
+#             nn.BatchNorm2d(64, momentum=0.9),
+#             nn.LeakyReLU(),
+#             # 第3层：1×1卷积，64维 → (dim*P)//patch²维（适配后续ViT输入）
+#             nn.Conv2d(64, (dim*P)//patch**2, kernel_size=(1, 1), stride=(1, 1), padding=(0, 0)),
+#             nn.BatchNorm2d((dim*P)//patch**2, momentum=0.5),
+#         )
+
+#         # 2. ViT模块（Vision Transformer）：捕获全局光谱-空间依赖关系
+#         # 输入：编码器输出特征图 → 输出：全局cls嵌入特征（用于丰度预测）
+#         self.vtrans = transformer.ViT(
+#             image_size=size, patch_size=patch, dim=(dim*P), depth=2,
+#             heads=8, mlp_dim=12, pool='cls'
+#         )
+        
+#         # 3. 上采样层（Upscale）：将ViT输出的嵌入特征映射为空间维度的丰度图
+#         self.upscale = nn.Sequential(
+#             nn.Linear(dim, size ** 2),  # 线性层：dim维 → size²维（对应size×size像素）
+#         )
+        
+#         # 4. 平滑层（Smooth）：优化丰度图空间连续性，施加Softmax约束（丰度和为1）
+#         self.smooth = nn.Sequential(
+#             nn.Conv2d(P, P, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),  # 3×3卷积（保持尺寸不变）
+#             nn.Softmax(dim=1),  # 通道维度Softmax（确保每个像素的所有端元丰度和为1）
+#         )
+
+#         # 5. 解码器（Decoder）：从丰度图重构高光谱图像
+#         # 输入：(1, P, size, size) 丰度图 → 输出：(1, L, size, size) 重构高光谱图像
+#         self.decoder = nn.Sequential(
+#             nn.Conv2d(P, L, kernel_size=(1, 1), stride=(1, 1), bias=False),  # 1×1卷积（丰度→高光谱重构）
+#             nn.ReLU(),  # 激活函数（保证重构值非负）
+#         )
+
+#     @staticmethod
+#     def weights_init(m):
+#         """
+#         模型权重初始化方法（静态方法）
+#         :param m: nn.Module - 模型的单个层（由apply()自动遍历所有层）
+#         """
+#         # 对卷积层使用Kaiming正态初始化（适配ReLU/LeakyReLU激活函数，提升收敛速度）
+#         if type(m) == nn.Conv2d:
+#             nn.init.kaiming_normal_(m.weight.data)
+
+#     def forward(self, x):
+#         """
+#         模型前向传播（核心：输入高光谱图像，输出预测丰度+重构图像）
+#         :param x: torch.Tensor - 输入高光谱图像，形状(1, L, size, size)
+#         :return: tuple - (abu_est: 预测丰度图, re_result: 重构高光谱图像)
+#         """
+#         # 步骤1：编码器提取特征
+#         abu_est = self.encoder(x)
+#         # 步骤2：ViT捕获全局依赖，输出cls嵌入特征
+#         cls_emb = self.vtrans(abu_est)
+#         # 步骤3：调整特征形状，适配后续上采样（1, P, dim）
+#         cls_emb = cls_emb.view(1, self.P, -1)
+#         # 步骤4：上采样，将嵌入特征映射为(size, size)空间尺寸的丰度图
+#         abu_est = self.upscale(cls_emb).view(1, self.P, self.size, self.size)
+#         # 步骤5：平滑丰度图，施加Softmax约束（保证丰度物理意义）
+#         abu_est = self.smooth(abu_est)
+#         # 步骤6：解码器从丰度图重构高光谱图像
+#         re_result = self.decoder(abu_est)
+        
+#         return abu_est, re_result
+
 # -------------------------
-# AutoEncoder类：CNN-ViT混合自编码器（高光谱解混核心模型）
+# AutoEncoder类：支持消融实验的混合模型（完整版）
 # 作用：实现高光谱图像的编码、特征提取、丰度预测与图像重构
 # -------------------------
 class AutoEncoder(nn.Module):
-    def __init__(self, P, L, size, patch, dim):
-        """
-        初始化自编码器模型
-        :param P: int - 端元数（地物类别数，如Samson=3、DC=6）
-        :param L: int - 高光谱波段数（如Samson=156、DC=191）
-        :param size: int - 高光谱图像的空间尺寸（如Samson=95 → 95×95像素）
-        :param patch: int - ViT的.patch尺寸（图像分块大小）
-        :param dim: int - ViT的特征维度（嵌入维度）
-        """
+    def __init__(self, P, L, size, patch, dim, use_transformer=True): 
         super(AutoEncoder, self).__init__()
-        # 保存模型核心参数（供前向传播使用）
+        # 保存模型核心参数
         self.P, self.L, self.size, self.dim = P, L, size, dim
+        self.use_transformer = use_transformer # 保存消融实验状态开关
 
-        # 1. 编码器（Encoder）：CNN卷积层，用于提取高光谱图像的光谱-空间特征
-        # 输入：(1, L, size, size) → 输出：(1, (dim*P)//patch**2, size, size)
+        # 1. 编码器（Encoder）：CNN 卷积层提取基础特征
         self.encoder = nn.Sequential(
-            # 第1层：1×1卷积（波段维度压缩），输入L维 → 输出128维
-            nn.Conv2d(L, 128, kernel_size=(1, 1), stride=(1, 1), padding=(0, 0)),
-            nn.BatchNorm2d(128, momentum=0.9),  # 批量归一化（加速收敛，防止过拟合）
-            nn.Dropout(0.25),  # Dropout正则化（随机丢弃25%神经元，防止过拟合）
-            nn.LeakyReLU(),  # 激活函数（带泄露的ReLU，避免梯度消失）
-            # 第2层：1×1卷积，128维 → 64维
-            nn.Conv2d(128, 64, kernel_size=(1, 1), stride=(1, 1), padding=(0, 0)),
+            nn.Conv2d(L, 128, kernel_size=(1, 1)),
+            nn.BatchNorm2d(128, momentum=0.9),
+            nn.Dropout(0.25),
+            nn.LeakyReLU(),
+            nn.Conv2d(128, 64, kernel_size=(1, 1)),
             nn.BatchNorm2d(64, momentum=0.9),
             nn.LeakyReLU(),
-            # 第3层：1×1卷积，64维 → (dim*P)//patch²维（适配后续ViT输入）
-            nn.Conv2d(64, (dim*P)//patch**2, kernel_size=(1, 1), stride=(1, 1), padding=(0, 0)),
-            nn.BatchNorm2d((dim*P)//patch**2, momentum=0.5),
+            # 动态调整通道数：如果是 CNN-Only（消融），只需少量通道
+            nn.Conv2d(64, (dim*P)//patch**2 if use_transformer else 32, kernel_size=(1, 1)),
+            nn.BatchNorm2d((dim*P)//patch**2 if use_transformer else 32, momentum=0.5),
         )
 
-        # 2. ViT模块（Vision Transformer）：捕获全局光谱-空间依赖关系
-        # 输入：编码器输出特征图 → 输出：全局cls嵌入特征（用于丰度预测）
-        self.vtrans = transformer.ViT(
-            image_size=size, patch_size=patch, dim=(dim*P), depth=2,
-            heads=8, mlp_dim=12, pool='cls'
-        )
-        
-        # 3. 上采样层（Upscale）：将ViT输出的嵌入特征映射为空间维度的丰度图
-        self.upscale = nn.Sequential(
-            nn.Linear(dim, size ** 2),  # 线性层：dim维 → size²维（对应size×size像素）
-        )
-        
-        # 4. 平滑层（Smooth）：优化丰度图空间连续性，施加Softmax约束（丰度和为1）
+        # 根据开关选择特征提取路径
+        if self.use_transformer:
+            # 2. Transformer 模块：捕获全局依赖
+            self.vtrans = transformer.ViT(
+                image_size=size, patch_size=patch, dim=(dim*P), depth=2,
+                heads=8, mlp_dim=12, pool='cls'
+            )
+            # 3. 上采样层：映射回丰度空间
+            self.upscale = nn.Sequential(nn.Linear(dim, size ** 2))
+        else:
+            # 消融实验分支：CNN 瓶颈层直接输出丰度
+            self.cnn_bottleneck = nn.Sequential(
+                nn.Conv2d(32, P, kernel_size=1),
+                nn.BatchNorm2d(P),
+                nn.LeakyReLU()
+            )
+
+        # 4. 平滑层：优化丰度图空间连续性，施加 Softmax 约束（丰度和为 1）
         self.smooth = nn.Sequential(
-            nn.Conv2d(P, P, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),  # 3×3卷积（保持尺寸不变）
-            nn.Softmax(dim=1),  # 通道维度Softmax（确保每个像素的所有端元丰度和为1）
+            nn.Conv2d(P, P, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
+            nn.Softmax(dim=1),
         )
 
-        # 5. 解码器（Decoder）：从丰度图重构高光谱图像
-        # 输入：(1, P, size, size) 丰度图 → 输出：(1, L, size, size) 重构高光谱图像
+        # 5. 解码器（Decoder）：端元线性组合重构图像
         self.decoder = nn.Sequential(
-            nn.Conv2d(P, L, kernel_size=(1, 1), stride=(1, 1), bias=False),  # 1×1卷积（丰度→高光谱重构）
-            nn.ReLU(),  # 激活函数（保证重构值非负）
+            nn.Conv2d(P, L, kernel_size=(1, 1), stride=(1, 1), bias=False),
+            nn.ReLU(),
         )
 
     @staticmethod
     def weights_init(m):
         """
         模型权重初始化方法（静态方法）
-        :param m: nn.Module - 模型的单个层（由apply()自动遍历所有层）
         """
-        # 对卷积层使用Kaiming正态初始化（适配ReLU/LeakyReLU激活函数，提升收敛速度）
         if type(m) == nn.Conv2d:
+            nn.init.kaiming_normal_(m.weight.data)
+        elif type(m) == nn.Linear:
             nn.init.kaiming_normal_(m.weight.data)
 
     def forward(self, x):
         """
-        模型前向传播（核心：输入高光谱图像，输出预测丰度+重构图像）
-        :param x: torch.Tensor - 输入高光谱图像，形状(1, L, size, size)
-        :return: tuple - (abu_est: 预测丰度图, re_result: 重构高光谱图像)
+        模型前向传播
         """
-        # 步骤1：编码器提取特征
-        abu_est = self.encoder(x)
-        # 步骤2：ViT捕获全局依赖，输出cls嵌入特征
-        cls_emb = self.vtrans(abu_est)
-        # 步骤3：调整特征形状，适配后续上采样（1, P, dim）
-        cls_emb = cls_emb.view(1, self.P, -1)
-        # 步骤4：上采样，将嵌入特征映射为(size, size)空间尺寸的丰度图
-        abu_est = self.upscale(cls_emb).view(1, self.P, self.size, self.size)
-        # 步骤5：平滑丰度图，施加Softmax约束（保证丰度物理意义）
+        # 步骤 1：提取特征
+        features = self.encoder(x)
+        
+        if self.use_transformer:
+            # 步骤 2 & 3：Transformer 路径
+            cls_emb = self.vtrans(features)
+            cls_emb = cls_emb.view(1, self.P, -1)
+            abu_est = self.upscale(cls_emb).view(1, self.P, self.size, self.size)
+        else:
+            # 步骤 2 & 3（消融）：直接卷积输出
+            abu_est = self.cnn_bottleneck(features)
+            # 插值保险：确保尺寸严格对齐 size x size
+            if abu_est.shape[-1] != self.size:
+                abu_est = F.interpolate(abu_est, size=(self.size, self.size), mode='bilinear')
+
+        # 步骤 4：平滑与物理约束
         abu_est = self.smooth(abu_est)
-        # 步骤6：解码器从丰度图重构高光谱图像
+        # 步骤 5：解码重构
         re_result = self.decoder(abu_est)
         
         return abu_est, re_result
-
-
 # -------------------------
 # NonZeroClipper类：模型参数非负约束器
 # 作用：确保解码器的卷积层权重非负（符合高光谱解混的物理约束，避免重构值为负）
@@ -165,7 +253,7 @@ class NonZeroClipper(object):
 # 作用：封装完整的实验流程，包括数据加载、模型训练、评估、可视化、结果保存
 # -------------------------
 class Train_test:
-    def __init__(self, dataset, device, skip_train=False, save=False):
+    def __init__(self, dataset, device, skip_train=False, save=False, use_transformer=True):
         """
         初始化实验配置与数据集
         :param dataset: str - 数据集名称（samson/apex/dc）
@@ -173,13 +261,20 @@ class Train_test:
         :param skip_train: bool - 是否跳过训练（直接加载已保存模型）
         :param save: bool - 是否保存模型权重、损失、结果文件
         """
+       
         super(Train_test, self).__init__()
         # 保存实验配置参数
         self.skip_train = skip_train  # 是否跳过训练
         self.device = device          # 计算设备
+
+        # 固定 CAE 结果的存储主目录
+        self.save_dir = f"Ablation_Analysis_{dataset}_CAE/"
+        os.makedirs(self.save_dir, exist_ok=True)
+
         self.dataset = dataset        # 数据集名称
         self.save = save              # 是否保存结果
-
+        self.use_transformer = use_transformer
+        
         # 添加光谱平滑性损失权重参数
         self.lambda_smooth = 10  # 平滑性损失的权重，可根据需要调整！！！！！
 
@@ -191,10 +286,10 @@ class Train_test:
         if dataset == 'samson':
             # Samson数据集：3端元、156波段、95×95像素
             self.P, self.L, self.col = 3, 156, 95
-            self.LR, self.EPOCH = 6e-3, 200  # 学习率、训练轮数
+            self.LR, self.EPOCH = 8e-3, 200  # 学习率、训练轮数
             self.patch, self.dim = 5, 200    # ViT.patch尺寸、嵌入维度
             self.beta, self.gamma = 5e3, 3e-2  # 重构损失、SAD损失的权重系数
-            self.weight_decay_param = 4e-5   # 优化器权重衰减（正则化）
+            self.weight_decay_param = 2e-5   # 优化器权重衰减（正则化）
             self.order_abd, self.order_endmem = (0, 1, 2), (0, 1, 2)  # 丰度/端元顺序调整（对齐真实值）
             # 加载数据集（调用datasets.py的Data类）
             self.data = datasets.Data(dataset, device)
@@ -209,7 +304,7 @@ class Train_test:
             self.LR, self.EPOCH = 6e-3, 300 #从 8e-3 降到 4e-3，轮数从 200 增到 300
             self.patch, self.dim = 5, 200
             self.beta, self.gamma = 5e3, 6e-2  # 将 gamma 从 4e-2 提高到 6e-2，强制模型更关注光谱形状
-            self.weight_decay_param = 3e-5
+            self.weight_decay_param = 9e-5
             # 注意：如果训练出来颜色不对，可以调整这个顺序对齐真值标签
             self.order_abd, self.order_endmem = (0, 1, 2, 3), (0, 1, 2, 3)
             self.data = datasets.Data(dataset, device)
@@ -220,10 +315,10 @@ class Train_test:
         elif dataset == 'apex':
             # APEX数据集：4端元、285波段、110×110像素
             self.P, self.L, self.col = 4, 285, 110
-            self.LR, self.EPOCH = 8e-3, 200
+            self.LR, self.EPOCH = 3e-3, 200
             self.patch, self.dim = 5, 200
             self.beta, self.gamma = 5e3, 5e-2
-            self.weight_decay_param = 4e-5
+            self.weight_decay_param = 8e-5
             self.order_abd, self.order_endmem = (0, 1, 2, 3), (0, 1, 2, 3)
             self.data = datasets.Data(dataset, device)
             self.loader = self.data.get_loader(batch_size=self.col ** 2)
@@ -253,7 +348,8 @@ class Train_test:
         # 1. 初始化模型并移至指定设备
         net = AutoEncoder(
             P=self.P, L=self.L, size=self.col,
-            patch=self.patch, dim=self.dim
+            patch=self.patch, dim=self.dim,
+            use_transformer=self.use_transformer # 传入参数
         ).to(self.device)
 
         # 2. 打印模型结构摘要（若smry=True，需启用torchsummary）
@@ -262,7 +358,7 @@ class Train_test:
             return
 
         # 3. 模型权重初始化（调用AutoEncoder的weights_init方法）
-        net.apply(net.weights_init)
+        net.apply(AutoEncoder.weights_init)
 
         # （注释部分：解码器权重初始化，使用数据集提供的初始端元权重）
         model_dict = net.state_dict()
@@ -442,8 +538,13 @@ class Train_test:
                 print("Class", i + 1, ":", sad_cls[i])
             print("Mean SAD:", mean_sad)
 
-            # 7.8 记录实验日志（csv格式，方便后续对比实验）
+            # 自动识别当前模型类型前缀
+
+            model_prefix = "CAE_" if not self.use_transformer else "Full_"
+
+            # 7.8 记录实验详细日志（在当前实验目录下）
             with open(self.save_dir + "log1.csv", 'a') as file:
+                file.write(f"Model: {model_prefix}, ")
                 file.write(f"LR: {self.LR}, ")
                 file.write(f"WD: {self.weight_decay_param}, ")
                 file.write(f"RE: {re:.4f}, ")
