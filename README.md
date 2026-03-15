@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Hyperspectral Unmixing using Transformer Network
 
 [Preetam Ghosh](https://scholar.google.com/citations?user=2HrZI6sAAAAJ&hl=en), [Swalpa Kumar Roy](https://swalpa.github.io), [Bikram Koirala](https://visielab.uantwerpen.be/people/bikram-koirala), [Behnood Rasti](https://scholar.google.com/citations?user=hA_Xi6MAAAAJ&hl=en), and [Paul Scheunders](https://visielab.uantwerpen.be/people/paul-scheunders) 
@@ -31,3 +32,7 @@ If you use the code in your research, we would appreciate a citation to the orig
 		pp.={01-16},
 		year={2022}
 		}
+=======
+# DeepTrans-HSU
+这是本科生毕业设计的内容，是基于Transfomer的混合编码网络架构的研究，这部分是基于Thanks to [UPCGIT](https://github.com/UPCGIT) for the re-implementation of our paper (https://github.com/UPCGIT/Hyperspectral-Unmixing-Models/tree/main/TAEU)项目所做的部分研究
+>>>>>>> be84a44ef57eb5a44147428a096787001250c1e8
